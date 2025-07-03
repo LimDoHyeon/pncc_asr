@@ -2,10 +2,10 @@ from typing import Tuple
 import numpy as np
 import torch
 import torchaudio
-from scipy import signal
+from scipy import signal  # for Gammatone design only (CPU)
 
 
-def load_audio(path: str, target_sr: int = 16000, device: torch.device = 'cpu') -> Tuple[torch.Tensor, int]:
+def load_audio(path: str, target_sr: int, device: torch.device = 'cpu') -> Tuple[torch.Tensor, int]:
     """Load mono wav, resample, move to *device* (shape [T])."""
     wav, sr = torchaudio.load(path)  # [C, T]
     wav = wav[0] if wav.shape[0] > 1 else wav.squeeze(0)
@@ -14,6 +14,10 @@ def load_audio(path: str, target_sr: int = 16000, device: torch.device = 'cpu') 
         sr = target_sr
     return wav.to(device), sr
 
+
+# ────────────────────────────────────────────────────────────────────────────────
+#  Utility – build Gammatone filterbank magnitude response (CPU → numpy)
+# ────────────────────────────────────────────────────────────────────────────────
 
 def erb_scale_freqs(f_min: float, f_max: float, n: int) -> np.ndarray:
     """ERB‑spaced center‑frequencies (Glasberg & Moore)."""
@@ -30,8 +34,8 @@ def erb_scale_freqs(f_min: float, f_max: float, n: int) -> np.ndarray:
     return erb_to_hz(erb_points)
 
 
-def build_gammatone_bank(sr: int = 16000, n_fft: int = 1024, n_ch: int = 40,
-                         f_min: int = 200, f_max: int = 8000) -> torch.Tensor:
+def build_gammatone_bank(sr, n_fft, n_ch,
+                         f_min: int, f_max: int) -> torch.Tensor:
     """Return torch tensor [n_ch, n_fft//2+1] of |H_l(e^{jω_k})|^2.
 
     * Each channel is area‑normalised: Σ_k |H_l|² = 1.
@@ -65,10 +69,12 @@ def pre_emphasis(x: torch.Tensor, coeff: float = 0.97) -> torch.Tensor:
     return y
 
 
-def stft_power(x: torch.Tensor, n_fft=1024, hop_length: int = (0.01 * 16000),
-               win_length: int = 0.0256 * 16000) -> torch.Tensor:
-    hop_length = int(hop_length)
-    win_length = int(win_length)
+def stft_power(x: torch.Tensor,
+               n_fft,
+               hop_length,
+               win_length) -> torch.Tensor:
+    hop_length = hop_length
+    win_length = win_length
     window = torch.hamming_window(win_length, device=x.device)
     X = torch.stft(x, n_fft, hop_length=hop_length, win_length=win_length,
                    window=window, return_complex=True)
@@ -171,17 +177,43 @@ def power_nonlinearity(U: torch.Tensor, exp: float = 1 / 15) -> torch.Tensor:
     return torch.pow(U, exp)
 
 
-def dct_feats(V: torch.Tensor, n_ceps: int = 13) -> torch.Tensor:
+def dct_feats(n_ceps: int, V: torch.Tensor) -> torch.Tensor:
     """Apply DCT (type‑II) across channel axis → cepstra [n_ceps, T]"""
-    import torch.fft as fft
     L = V.shape[0]
     k = torch.arange(L, device=V.device)
     basis = torch.cos(np.pi / L * (k + 0.5).unsqueeze(0) * torch.arange(n_ceps, device=V.device).unsqueeze(1))
     return basis @ V  # [n_ceps,T]
 
 
-def pncc(wav: torch.Tensor, sr: int = 16000) -> torch.Tensor:
-    """Compute 13‑dim base PNCC (no Δ/ΔΔ) for a mono waveform."""
+# def pncc(wav: torch.Tensor, sr: int = 16000) -> torch.Tensor:
+def pncc(
+        wav: torch.Tensor,
+        sr: int,
+        n_fft: int = 1024,
+        win_length: int = 400,  # in seconds
+        hop_length: int = 160,  # in seconds
+        n_ch: int = 40,
+        f_min: int = 200,
+        f_max: int = 8000,
+        n_ceps: int = 13,
+) -> torch.Tensor:
+    """Compute PNCC with fully configurable STFT and filterbank parameters.
+
+    Args:
+      wav:      [T] mono waveform.
+      sr:       sample rate (Hz).
+      n_fft:    FFT size.
+      win_length: STFT window length (seconds).
+      hop_length:  STFT hop length (seconds).
+      n_ch:     number of gammatone channels.
+      f_min:    lowest center-frequency (Hz).
+      f_max:    highest center-frequency (Hz).
+      M, la, lb, lt, mu_t: PNCC-specific hyperparameters.
+      n_ceps:   number of DCT cepstra to return.
+      power:    exponent for power-law nonlinearity.
+    Returns:
+      C: [n_ceps, T_frames] PNCC feature matrix.
+    """
     if sr != sr:
         raise ValueError(f"sample‑rate {sr} unsupported; expected {sr}")
 
@@ -189,10 +221,21 @@ def pncc(wav: torch.Tensor, sr: int = 16000) -> torch.Tensor:
     wav = pre_emphasis(wav)
 
     # 2. STFT power
-    P_spec = stft_power(wav)  # [F,T]
+    P_spec = stft_power(
+        wav,
+        n_fft=n_fft,
+        hop_length=hop_length,
+        win_length=win_length,
+    )  # [F, T]
 
     # 3. Gammatone filterbank power P[m,l]
-    H = build_gammatone_bank().to(P_spec.device, P_spec.dtype)
+    H = build_gammatone_bank(
+        sr=sr,
+        n_fft=n_fft,
+        n_ch=n_ch,
+        f_min=f_min,
+        f_max=f_max,
+    ).to(P_spec.device, P_spec.dtype)
     P_ml = apply_filterbank(P_spec, H)  # [L,T]
 
     # 4. Medium‑time average Q̃
@@ -226,6 +269,6 @@ def pncc(wav: torch.Tensor, sr: int = 16000) -> torch.Tensor:
     V_ml = power_nonlinearity(U_ml)
 
     # 14. DCT → cepstra
-    C = dct_feats(V_ml, 13)  # [13,T]
+    C = dct_feats(n_ceps, V_ml)  # [13,T]
 
     return C  # [13, T]
