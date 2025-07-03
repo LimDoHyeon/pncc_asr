@@ -185,8 +185,8 @@ def pncc(
         wav: torch.Tensor,
         sr: int,
         n_fft: int = 1024,
-        win_length: int = 400,  # in seconds
-        hop_length: int = 160,  # in seconds
+        win_length: int = 400,
+        hop_length: int = 160,
         n_ch: int = 40,
         f_min: int = 200,
         f_max: int = 8000,
