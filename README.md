@@ -20,6 +20,22 @@ pip install -r requirements.txt
 
 And use this function:
 ```python
-def pncc(wav: torch.Tensor, sr: int = 16000) -> torch.Tensor:
+def pncc(
+    wav: torch.Tensor,
+    sr: int,
+    n_fft: int = 1024,
+    win_length: int = 400,
+    hop_length: int = 160,
+    n_ch: int = 40,
+    f_min: int = 200,
+    f_max: int = 8000,
+    n_ceps: int = 13,
+) -> torch.Tensor:
 ```
+```python
+import torchaudio
+import pncc_asr as PNCC
 
+y, sr = torchaudio.load('your_audiofile.wav')
+pncc = PNCC.pncc(y, sr)
+```
