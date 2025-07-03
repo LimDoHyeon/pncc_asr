@@ -40,4 +40,7 @@ y, sr = torchaudio.load('your_audiofile.wav')
 pncc = PNCC.pncc(y, sr)
 ```
 
+## Result
+![Image](https://github.com/user-attachments/assets/44694e66-ee67-40fb-ab6c-12428b92802d)
+
 Author: Do-Hyeon Lim
