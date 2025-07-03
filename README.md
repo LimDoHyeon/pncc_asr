@@ -39,3 +39,5 @@ import pncc_asr as PNCC
 y, sr = torchaudio.load('your_audiofile.wav')
 pncc = PNCC.pncc(y, sr)
 ```
+
+Author: Do-Hyeon Lim
