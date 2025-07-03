@@ -12,7 +12,7 @@ This code is based on **"Power-Normalized Cepstral Coefﬁcients (PNCC) for Robu
 First, Clone this repository and install requirements.
 ```bash
 cd ~
-git clone https://github.com/LimDoHYeon/pncc_asr.git
+git clone https://github.com/LimDoHyeon/pncc_asr.git
 cd pncc_asr
 pip install -r requirements.txt
 ```
