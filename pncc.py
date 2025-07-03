@@ -15,10 +15,6 @@ def load_audio(path: str, target_sr: int, device: torch.device = 'cpu') -> Tuple
     return wav.to(device), sr
 
 
-# ────────────────────────────────────────────────────────────────────────────────
-#  Utility – build Gammatone filterbank magnitude response (CPU → numpy)
-# ────────────────────────────────────────────────────────────────────────────────
-
 def erb_scale_freqs(f_min: float, f_max: float, n: int) -> np.ndarray:
     """ERB‑spaced center‑frequencies (Glasberg & Moore)."""
 
@@ -185,7 +181,6 @@ def dct_feats(n_ceps: int, V: torch.Tensor) -> torch.Tensor:
     return basis @ V  # [n_ceps,T]
 
 
-# def pncc(wav: torch.Tensor, sr: int = 16000) -> torch.Tensor:
 def pncc(
         wav: torch.Tensor,
         sr: int,
