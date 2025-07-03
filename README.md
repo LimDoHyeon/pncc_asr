@@ -2,6 +2,7 @@
 An implementation of Power-Normalized Cepstral Coefficients(PNCC) (supports GPU computation)
 
 This code is based on **"Power-Normalized Cepstral Coefﬁcients (PNCC) for Robust Speech Recognition(Chanwoo Kim, 2016)"**.
+
 < paper link: https://ieeexplore.ieee.org/document/7439789 >
 
 
