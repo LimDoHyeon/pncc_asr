@@ -59,26 +59,35 @@ def build_gammatone_bank(sr, n_fft, n_ch,
 
 
 def pre_emphasis(x: torch.Tensor, coeff: float = 0.97) -> torch.Tensor:
-    y = torch.empty_like(x)
-    y[0] = x[0]
-    y[1:] = x[1:] - coeff * x[:-1]
-    return y
+    # y = torch.empty_like(x)
+    # y[0] = x[0]
+    # y[1:] = x[1:] - coeff * x[:-1]
+    # return y
+    if x.dim() == 1:
+        y = torch.empty_like(x)
+        y[0] = x[0]
+        y[1:] = x[1:] - coeff * x[:-1]
+        return y
+    elif x.dim() == 2:
+        y = torch.empty_like(x)
+        y[:, 0] = x[:, 0]
+        y[:, 1:] = x[:, 1:] - coeff * x[:, :-1]
+        return y
+    else:
+        raise ValueError(f"pre_emphasis expects 1D or 2D tensor, got {x.shape}")
 
 
 def stft_power(x: torch.Tensor,
                n_fft,
                hop_length,
                win_length) -> torch.Tensor:
-    hop_length = hop_length
-    win_length = win_length
     window = torch.hamming_window(win_length, device=x.device)
     X = torch.stft(x, n_fft, hop_length=hop_length, win_length=win_length,
                    window=window, return_complex=True)
-    return X.abs().pow(2)  # [F, T]
+    return X.abs().pow(2)  # [B, F, T]
 
 
 def apply_filterbank(power_spec: torch.Tensor, H: torch.Tensor) -> torch.Tensor:
-    """power_spec: [F, T] ; H: [L, F] ; returns P[m,l]=40xT"""
     return torch.matmul(H, power_spec)
 
 
@@ -91,23 +100,30 @@ def medium_time_avg(P: torch.Tensor, M: int = 2) -> torch.Tensor:
     B, L, T = P.shape
     kernel = torch.ones(L, 1, 2 * M + 1, device=P.device) / (2 * M + 1)
     Q = torch.nn.functional.conv1d(P, kernel, padding=M, groups=L)
-    return Q.squeeze(0) if B == 1 else Q
+    return Q
 
 
 def asymmetric_filter(Q_in: torch.Tensor, la: float = 0.999, lb: float = 0.5) -> torch.Tensor:
     """Vectorised asymmetric low‑pass along time axis.
        Q_in: [L,T]  returns [L,T]
     """
-    L, T = Q_in.shape
+    if Q_in.dim() == 2:
+        Q_in = Q_in.unsqueeze(0)  # [1, L, T]
+    elif Q_in.dim() == 3:
+        pass
+    else:
+        raise ValueError(f"asymmetric_filter expects 2D or 3D tensor, got {Q_in.shape}")
+
+    B, L, T = Q_in.shape
     Q_out = torch.empty_like(Q_in)
     # init
-    Q_out[:, 0] = 0.9 * Q_in[:, 0]
+    Q_out[:, :, 0] = 0.9 * Q_in[:, :, 0]
     for t in range(1, T):
-        rise = Q_in[:, t] >= Q_out[:, t - 1]
-        Q_out[:, t] = torch.where(
+        rise = Q_in[:, :, t] >= Q_out[:, :, t - 1]
+        Q_out[:, :, t] = torch.where(
             rise,
-            la * Q_out[:, t - 1] + (1 - la) * Q_in[:, t],
-            lb * Q_out[:, t - 1] + (1 - lb) * Q_in[:, t],
+            la * Q_out[:, :, t - 1] + (1 - la) * Q_in[:, :, t],
+            lb * Q_out[:, :, t - 1] + (1 - lb) * Q_in[:, :, t],
         )
     return Q_out
 
@@ -117,37 +133,50 @@ def half_wave_rectifier(x: torch.Tensor) -> torch.Tensor:
 
 
 def temporal_masking(Q0: torch.Tensor, lt: float = 0.85, mu_t: float = 0.2) -> torch.Tensor:
-    """Implements paper Eq.(11)–(12). Q0 shape [L,T]"""
-    L, T = Q0.shape
+    """Implements paper Eq.(11)–(12). Q0 shape [B, L,T]"""
+    if Q0.dim() == 2:
+        Q0 = Q0.unsqueeze(0)  # [1, L, T]
+    elif Q0.dim() != 3:
+        raise ValueError(f"asymmetric_filter expects 2D or 3D tensor, got {Q0.shape}")
+
+    B, L, T = Q0.shape
     Qp = torch.empty_like(Q0)
-    Qp[:, 0] = Q0[:, 0]
     Qtm = torch.empty_like(Q0)
+    Qp[:, :, 0] = Q0[:, :, 0]
+    Qtm[:, :, 0] = Q0[:, :, 0]
 
     for t in range(1, T):
-        Qp[:, t] = torch.maximum(lt * Qp[:, t - 1], Q0[:, t])
-        Qtm[:, t] = torch.where(
-            Q0[:, t] >= lt * Qp[:, t - 1],
-            Q0[:, t],
-            mu_t * Qp[:, t - 1],
+        Qp[:, :, t] = torch.maximum(lt * Qp[:, :, t - 1], Q0[:, :, t])
+        Qtm[:, :, t] = torch.where(
+            Q0[:, :, t] >= lt * Qp[:, :, t - 1],
+            Q0[:, :, t],
+            mu_t * Qp[:, :, t - 1],
         )
-    Qtm[:, 0] = Q0[:, 0]  # first frame untouched
+    Qtm[:, :, 0] = Q0[:, :, 0]  # first frame untouched
     return Qtm
 
 
 def excitation_switch(Q_tm: torch.Tensor, Q_f: torch.Tensor, Q_med: torch.Tensor, Q_le: torch.Tensor,
                       c: float = 2.0) -> torch.Tensor:
     Q_1 = torch.maximum(Q_tm, Q_f)
-    mask_exc = Q_med >= c * Q_le
-    return torch.where(mask_exc, Q_1, Q_f)
+    mask_exc = Q_med >= c * Q_le  # [B, L, T]
+    return torch.where(mask_exc, Q_1, Q_f)  # [B, L, T]
 
 
 def spectral_smoothing(R: torch.Tensor, Q: torch.Tensor, N: int = 4) -> torch.Tensor:
-    L, T = R.shape
+    if R.dim() == 2:
+        R = R.unsqueeze(0)
+        Q = Q.unsqueeze(0)
+    elif R.dim() != 3:
+        raise ValueError(f"asymmetric_filter expects 2D or 3D tensor, got {R.shape}")
+
+    B, L, T = R.shape
     S = torch.empty_like(R)
     R_div_Q = R / (Q + 1e-12)
-    for l in range(L):
-        l1, l2 = max(l - N, 0), min(l + N, L - 1)
-        S[l] = R_div_Q[l1: l2 + 1].mean(dim=0)
+    for b in range(B):
+        for l in range(L):
+            l1, l2 = max(l - N, 0), min(l + N, L - 1)
+            S[b, l] = R_div_Q[b, l1:l2 + 1].mean(dim=0)
     return S
 
 
@@ -166,7 +195,7 @@ def mean_power_normalization(Tm: torch.Tensor, lam: float = 0.999) -> torch.Tens
 
     eps = 1e-12
     T_norm = Tm / (mu.unsqueeze(1) + eps)
-    return T_norm.squeeze(0) if B == 1 else T_norm
+    return T_norm
 
 
 def power_nonlinearity(U: torch.Tensor, exp: float = 1 / 15) -> torch.Tensor:
@@ -175,14 +204,21 @@ def power_nonlinearity(U: torch.Tensor, exp: float = 1 / 15) -> torch.Tensor:
 
 def dct_feats(n_ceps: int, V: torch.Tensor) -> torch.Tensor:
     """Apply DCT (type‑II) across channel axis → cepstra [n_ceps, T]"""
-    L = V.shape[0]
-    k = torch.arange(L, device=V.device)
-    basis = torch.cos(np.pi / L * (k + 0.5).unsqueeze(0) * torch.arange(n_ceps, device=V.device).unsqueeze(1))
-    return basis @ V  # [n_ceps,T]
+    if V.dim() == 2:
+        L, T = V.shape
+        k = torch.arange(L, device=V.device)
+        basis = torch.cos(np.pi / L * (k + 0.5).unsqueeze(0) * torch.arange(n_ceps, device=V.device).unsqueeze(1))
+        return basis @ V
+    elif V.dim() == 3:
+        B, L, T = V.shape
+        k = torch.arange(L, device=V.device)
+        basis = torch.cos(np.pi / L * (k + 0.5).unsqueeze(0) * torch.arange(n_ceps, device=V.device).unsqueeze(1))
+        # return basis @ V  # [n_ceps,T]
+        return torch.einsum('kl,blt->bkt', basis, V)
 
 
 def pncc(
-        wav: torch.Tensor,
+        wavs: torch.Tensor,
         sr: int,
         n_fft: int = 1024,
         win_length: int = 400,
@@ -211,13 +247,15 @@ def pncc(
     """
     if sr != sr:
         raise ValueError(f"sample‑rate {sr} unsupported; expected {sr}")
+    if wavs.dim() == 1:
+        wavs = wavs.unsqueeze(0)
 
     # 1. Pre‑emphasis
-    wav = pre_emphasis(wav)
+    wavs = pre_emphasis(wavs)  # supports [B, T] or [T]
 
     # 2. STFT power
     P_spec = stft_power(
-        wav,
+        wavs,
         n_fft=n_fft,
         hop_length=hop_length,
         win_length=win_length,
@@ -264,6 +302,6 @@ def pncc(
     V_ml = power_nonlinearity(U_ml)
 
     # 14. DCT → cepstra
-    C = dct_feats(n_ceps, V_ml)  # [13,T]
+    C = dct_feats(n_ceps, V_ml)  # [B, 13,T]
 
-    return C  # [13, T]
+    return C  # [B, 13, T]
