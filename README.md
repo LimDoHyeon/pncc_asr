@@ -9,7 +9,7 @@ This code is based on **"Power-Normalized Cepstral Coefﬁcients (PNCC) for Robu
 ## Usage
 - This code is based on torchaudio; the audio data have to be loaded by torchaudio.
 - All parameters follow the origianl paper.
-- 
+
 First, Clone this repository and install requirements.
 ```bash
 cd ~
