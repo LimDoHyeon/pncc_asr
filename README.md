@@ -35,7 +35,7 @@ def pncc(
 import torchaudio
 import pncc_asr as PNCC
 
-y, sr = torchaudio.load('your_audiofile.wav')
+y, sr = torchaudio.load('your_audiofile.wav')  # or you can use dataloader
 pncc = PNCC.pncc(y, sr)
 ```
 
