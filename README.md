@@ -1,14 +1,13 @@
 # pncc_asr
-An implementation of Power-Normalized Cepstral Coefficients(PNCC) (supports GPU computation)
+An implementation of ["Power-Normalized Cepstral Coefﬁcients (PNCC) for Robust Speech Recognition(Chanwoo Kim, 2016)"](https://ieeexplore.ieee.org/document/7439789).
 
-This code is based on **"Power-Normalized Cepstral Coefﬁcients (PNCC) for Robust Speech Recognition(Chanwoo Kim, 2016)"**.
-
-< paper link: https://ieeexplore.ieee.org/document/7439789 >
+This is unofficial code. Original code is implemented by C (see the paper).
 
 
 ## Usage
 - This code is based on torchaudio; the audio data have to be loaded by torchaudio.
 - All parameters follow the origianl paper.
+- You can use GPU computation in this code.
 
 First, Clone this repository and install requirements.
 ```bash
