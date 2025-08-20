@@ -1,7 +1,7 @@
 # pncc_asr
 An implementation of ["Power-Normalized Cepstral Coefﬁcients (PNCC) for Robust Speech Recognition(Chanwoo Kim, 2016)"](https://ieeexplore.ieee.org/document/7439789).
 
-This is unofficial code. Original code is implemented by C (see the paper).
+This is unofficial code. Original code is implemented by C (please see the paper).
 
 
 ## Usage
